@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+	<head>
+	  <title>Telemed Video Chat</title>
+	</head>
+	<body>
+		<h1>Telemed Vidoe Chat</h1>
+		
+		<div id="profile">
+			<input type="text" id="id" value="123" placeholder="ID" />
+			<input type="text" id="name" value="Nama Login" placeholder="Name" />
+			<input type="text" id="photo" value="http://abc.jpg" placeholder="Photo" />
+		</div>
+		
+		<div id="buttons">
+			<button id="connectAsDocterButton">Connect As Docter</button>
+			<button id="connectAsPatientButton">Connect As Patient</button>
+			<button id="disconnectButton">Disconnect</button>
+		</div>
+		
+		<div id="messages">
+			<input type="text" id="toId" value="" placeholder="Enter to user ID" />
+			<input type="text" id="message" value="" placeholder="Enter a message" />
+			<button id="sendMessageButton">Send Message</button>
+		</div>
+		
+		<script src="socket.io.min.js"></script>
+		<script src="js/main2.js"></script>
+	</body>
+</html>
