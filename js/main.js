@@ -202,12 +202,6 @@ function onCreateSessionDescriptionError(error) {
 	trace('Failed to create session description: ' + error.toString());
 }
 
-function handleRemoteStreamAdded(event) {
-	console.log('Remote stream added.');
-	remoteVideo.src = window.URL.createObjectURL(event.stream);
-	remoteStream = event.stream;
-}
-
 function handleRemoteStreamRemoved(event) {
 	console.log('Remote stream removed. Event: ', event);
 }
