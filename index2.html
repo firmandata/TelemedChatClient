@@ -1,35 +1,89 @@
 <!DOCTYPE html>
 <html>
 	<head>
-	  <title>Telemed Video Chat</title>
+		<meta http-equiv="X-UA-Compatible" content="IE=edge">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		
+		<title>Telemed Video Chat</title>
+		
+		<link href="css/bootstrap.min.css" rel="stylesheet" />
+		<link href="css/app.css" rel="stylesheet" />
+		
+		<script src="js/jquery-3.2.1.min.js"></script>
+		<script src="js/bootstrap.min.js"></script>
 	</head>
 	<body>
-		<h1>Telemed Vidoe Chat</h1>
-		
-		<div id="videos">
-			<video id="localVideo" autoplay muted></video>
-			<video id="remoteVideo" autoplay></video>
+		<div class="site-wrapper">
+			<div class="site-wrapper-inner">
+				<div class="cover-container">
+					<div class="inner cover" style="padding: 0 !important;">
+						<video id="remoteVideo" style="width:100%; height:100%; max-width:100%; max-height:100%; object-fit:cover; position: absolute;" autoplay></video>
+					</div>
+
+					<div class="masthead clearfix">
+						<div class="inner">
+							<h3 class="masthead-brand">Video Chat</h3>
+						</div>
+					</div>
+
+					<div class="mastfoot">
+						<div class="inner">
+							<div>
+								<video id="localVideo" style="max-width: 150px;" autoplay muted></video>
+							</div>
+							<div style="max-height: 100px; overflow-y: auto; margin-bottom: 5px;">
+								<ul id="messageList" style="list-style: none; padding-left: 2px;">
+								</ul>
+							</div>
+							<div>
+								<div class="input-group">
+									<input id="messageTextBox" type="text" class="form-control custom-control" placeholder="Pesan">
+									<span class="input-group-btn">
+										<button id="messageSendButton" type="button" class="btn btn-primary">Kirim</button>
+										<button id="callEndButton" type="button" class="btn btn-danger">Akhiri</button>
+									</span>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
 		</div>
 		
-		<div id="profile">
-			<input type="text" id="id" value="123" placeholder="ID" />
-			<input type="text" id="name" value="Nama Login" placeholder="Name" />
-			<input type="text" id="photo" value="http://abc.jpg" placeholder="Photo" />
+		<!-- Modal -->
+		<div id="modalCalling" class="modal fade" tabindex="-1" role="dialog" aria-labelledby="modalCallingLabel" data-backdrop="static" data-keyboard="false">
+			<div class="modal-dialog" role="document">
+				<div class="modal-content">
+					<div class="modal-header">
+						<h4 id="modalCallingLabel" class="modal-title">Seseorang Memanggil</h4>
+					</div>
+					<div class="modal-body">
+						<button type="button" id="callAnswerButton" class="btn btn-primary btn-lg btn-block">Jawab</button>
+						<button type="button" id="callRejectButton" class="btn btn-danger btn-lg btn-block">Tutup</button>
+					</div>
+				</div>
+			</div>
 		</div>
 		
-		<div id="buttons">
-			<button id="connectAsDocterButton">Connect As Docter</button>
-			<button id="connectAsPatientButton">Connect As Patient</button>
-			<button id="disconnectButton">Disconnect</button>
-		</div>
-		
-		<div id="messages">
-			<input type="text" id="toId" value="" placeholder="Enter to user ID" />
-			<input type="text" id="message" value="" placeholder="Enter a message" />
-			<button id="sendMessageButton">Send Message</button>
+		<!-- Modal -->
+		<div id="modalUsers" class="modal fade" tabindex="-1" role="dialog" aria-labelledby="modalUsersLabel">
+			<div class="modal-dialog" role="document">
+				<div class="modal-content">
+					<div class="modal-header">
+						<h3 id="modalUsersLabel" class="modal-title">Daftar Peserta</h3>
+					</div>
+					<div class="modal-body">
+						<h4>Pilih peserta untuk memulai percakapan</h4>
+						<div id="modalUsersList" style="max-height: 250px; overflow-y: auto; padding: 10px;">
+							
+						</div>
+					</div>
+				</div>
+			</div>
 		</div>
 		
 		<script src="socket.io.min.js"></script>
+		<script src="js/lib/adapter.js"></script>
 		<script src="js/main2.js"></script>
 	</body>
 </html>
