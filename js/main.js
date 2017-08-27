@@ -1,305 +1,665 @@
 'use strict';
 
-var isChannelReady = false;
-var isInitiator = false;
-var isStarted = false;
-var localStream;
-var pc;
-var remoteStream;
+var mSocket			= null;
+var mPeerConnection	= null;
 
-// var pcConfig = {
-	// 'iceServers': [
-		// {'url': 'stun:stun.l.google.com:19302'},
-		// {'url': 'stun:stun.services.mozilla.com'}
-	// ]
-// };
+var mToUserKey			= null;
+var mLocalVideo			= document.querySelector('#localVideo');
+var mLocalVideoStream	= null;
+var mRemoteVideo		= document.querySelector('#remoteVideo');
 
-// Set up audio and video regardless of what devices are present.
-var sdpConstraints = {
-	offerToReceiveAudio: true,
-	offerToReceiveVideo: true
+var messageTextBox = $('#messageTextBox');
+messageTextBox.keypress(function(e) {
+    if (e.which == 13)
+		sendChatMessage();
+});
+
+$('#messageSendButton').click(function() {
+	sendChatMessage();
+});
+
+function sendChatMessage() {
+	var message = messageTextBox.val();
+	addChatMessage(null, message);
+	socketManagementSendMessage(mSocket, mToUserKey, message);
+	messageTextBox.val("");
+	messageTextBox.focus();
+}
+
+$('#callAnswerButton').click(function() {
+	socketManagementDialAnswer(mSocket, mToUserKey);
+	
+	if (mPeerConnection === null)
+	{
+		// create pear connection
+		mPeerConnection = peerConnectionCreate(
+			mRemoteVideo,
+			function(data) {
+				socketManagementSendMessage(mSocket, mToUserKey, data);
+			}
+		);
+		
+		// local stream to send for target
+		peerConnectionAddStream(mPeerConnection, mLocalVideoStream);
+	}
+	
+	// send call for answer peer connection
+	peerConnectionDoCall(mPeerConnection);
+	
+	closeModalCalling();
+});
+
+$('#callRejectButton').click(function() {
+	socketManagementDialReject(mSocket, mToUserKey);
+	closeModalCalling();
+	showModalUsers();
+});
+
+$('#callEndButton').click(function() {
+	stopVideoCall(mToUserKey);
+	showModalUsers();
+});
+
+window.onbeforeunload = function() {
+	stopVideoCall(mToUserKey);
+	stopSession();
 };
 
-/////////////////////////////////////////////
-
-var room = 'foo';
-// Could prompt for room name:
-// room = prompt('Enter room name:');
-
-var socketio = io('https://192.168.0.8:8080');
-var socket = socketio.connect();
-
-if (room !== '') {
-	socket.emit('create or join', room);
-	console.log('Attempted to create or  join room', room);
+function getParameterByName(name) {
+	var url = window.location.href;
+	name = name.replace(/[\[\]]/g, "\\$&");
+	var regex = new RegExp("[?&]" + name + "(=([^&#]*)|&|#|$)"),
+		results = regex.exec(url);
+	if (!results)
+		return null;
+	if (!results[2])
+		return '';
+	return decodeURIComponent(results[2].replace(/\+/g, " "));
 }
 
-socket.on('created', function(room) {
-	console.log('Created room ' + room);
-	isInitiator = true;
-});
-
-socket.on('full', function(room) {
-	console.log('Room ' + room + ' is full');
-});
-
-socket.on('join', function (room){
-	console.log('Another peer made a request to join room ' + room);
-	console.log('This peer is the initiator of room ' + room + '!');
-	isChannelReady = true;
-});
-
-socket.on('joined', function(room) {
-	console.log('joined: ' + room);
-	isChannelReady = true;
-});
-
-socket.on('log', function(array) {
-	console.log.apply(console, array);
-});
-
-////////////////////////////////////////////////
-
-function sendMessage(message) {
-	console.log('Client sending message: ', message);
-	socket.emit('message', message);
+function showModalUsers() {
+	$('#modalUsers').modal({
+		backdrop	: 'static',
+		keyboard	: false,
+		show		: true
+	});
 }
 
-// This client receives a message
-socket.on('message', function(message) {
-	console.log('Client received message:', message);
-	if (message === 'got user media') {
-		maybeStart();
-	} else if (message.type === 'offer') {
-		if (!isInitiator && !isStarted) {
-			maybeStart();
+function closeModalUsers() {
+	$('#modalUsers').modal('hide');
+}
+
+function addUsersRegister(users) {
+	var user_list = $('#modalUsersList');
+	for (var user_idx in users)
+	{
+		var user = users[user_idx];
+		
+		var button_existing = $("button[data-key='" + user.key + "']", user_list);
+		if (button_existing.length == 0)
+		{
+			var button = $("<button>", {
+				'data-key'	: user.key,
+				'type'		: 'button',
+				'class'		: 'btn btn-primary btn-sm btn-block'
+			})
+			.text(user.name)
+			.click(function(){
+				var user_key = $(this).attr('data-key');
+				mToUserKey = user_key;
+				socketManagementDialRequest(mSocket, user_key);
+			});
+			user_list.append(button);
 		}
-		pc.setRemoteDescription(new RTCSessionDescription(message));
-		doAnswer();
-	} else if (message.type === 'answer' && isStarted) {
-		pc.setRemoteDescription(new RTCSessionDescription(message));
-	} else if (message.type === 'candidate' && isStarted) {
-		var candidate = new RTCIceCandidate({
-			sdpMLineIndex: message.label,
-			candidate: message.candidate
-		});
-		pc.addIceCandidate(candidate);
-	} else if (message === 'bye' && isStarted) {
-		handleRemoteHangup();
+		else
+		{
+			if (user.oncall)
+				button_existing.text(user.name + " [on calling]");
+			else
+				button_existing.text(user.name);
+		}
 	}
-});
+}
 
-////////////////////////////////////////////////////
+function removeUsersRegister(users) {
+	var user_list = $('#modalUsersList');
+	for (var user_idx in users)
+	{
+		var user = users[user_idx];
+		
+		var button = $("button[data-key='" + user.key + "']", user_list);
+		button.remove();
+	}
+}
 
-var localVideo = document.querySelector('#localVideo');
-var remoteVideo = document.querySelector('#remoteVideo');
+function showModalCalling(user_caller) {
+	$('#modalCalling').modal({
+		backdrop	: 'static',
+		keyboard	: false,
+		show		: true
+	});
+	
+	if (user_caller)
+	{
+		$('#modalCallingLabel').text(user_caller.name + " memanggil...");
+	}
+}
+
+function closeModalCalling() {
+	$('#modalCalling').modal('hide');
+	$('#modalCallingLabel').text("Tidak ada yang memanggil.");
+}
+
+function addChatMessage(user, message) {
+	var message_list = $('#messageList');
+	var user_name = "me";
+	if (user)
+		user_name = user.name;
+	var message = $("<li>")
+		.text(user_name + " : " + message);
+	message_list.append(message);
+	
+	var message_list_parent = message_list.parent();
+	message_list_parent.scrollTop(message_list_parent[0].scrollHeight);
+}
+
+// ---------------------
+// -- session handler --
+// ---------------------
+
+function startSession() {
+	var id = getParameterByName('id'),
+		type = getParameterByName('type'),
+		name = getParameterByName('name'),
+		photo = "http://localhost/image.jpg";
+	
+	mSocket = socketManagementRegister(
+		{
+			id		: id,
+			type	: type,
+			name	: name,
+			photo	: photo
+		},
+		{
+			onRegistered			: signalOnRegistered,
+			onUserOtherRegistered	: signalOnUserOtherRegistered,
+			onUserOtherUnregistered	: signalOnUserOtherUnregistered,
+			onGetUserOthers			: signalOnGetUserOthers,
+			onUserOtherOffCall		: signalOnUserOtherOffCall,
+			onUserOtherOnCall		: signalOnUserOtherOnCall,
+			onRequestDial			: signalOnRequestDial,
+			onDialingFailed			: signalOnDialingFailed,
+			onDialAnswered			: signalOnDialAnswered,
+			onDialRejected			: signalOnDialRejected,
+			onDialEnded				: signalOnDialEnded,
+			onMessageReceive		: signalOnMessageReceive
+		}
+	);
+}
 
 navigator.mediaDevices.getUserMedia({
 	audio: true,
 	video: true
 })
-.then(gotStream)
-.catch(function(e) {
-	alert('getUserMedia() error: ' + e.name);
-});
+	.then(function(stream) {
+		if (mLocalVideo === null)
+			return;
+		
+		// show local video
+		mLocalVideo.src = window.URL.createObjectURL(stream);
+		mLocalVideoStream = stream;
+	})
+	.catch(function(e) {
+		alert('getUserMedia() error: ' + e.name);
+	});
 
-function gotStream(stream) {
-	console.log('Adding local stream.');
-	localVideo.src = window.URL.createObjectURL(stream);
-	localStream = stream;
-	sendMessage('got user media');
-	if (isInitiator) {
-		maybeStart();
+function stopVideoCall(to_user_key) {
+	// -- send dial end message --
+	socketManagementDialEnd(mSocket, to_user_key);
+	
+	// -- close peer connection --
+	peerConnectionDestroy(mPeerConnection);
+	mPeerConnection = null;
+	
+	// -- close local video stream --
+	// if (mLocalVideoStream !== null)
+		// mLocalVideoStream.getTracks()[0].stop();
+	// mLocalVideoStream = null;
+}
+
+function stopSession() {
+	// -- unregister and close the socket --
+	socketManagementUnregister(mSocket);
+	mSocket = null;
+}
+
+startSession();
+
+// -----------------------
+// -- signaling handler --
+// -----------------------
+
+function signalOnRegistered(user_my) {
+	showModalUsers();
+	socketManagementGetUserOthers(mSocket);
+}
+
+function signalOnUserOtherRegistered(user_other) {
+	addUsersRegister([user_other]);
+}
+
+function signalOnUserOtherUnregistered(user_other) {
+	removeUsersRegister([user_other]);
+}
+
+function signalOnGetUserOthers(user_others) {
+	addUsersRegister(user_others);
+}
+
+function signalOnUserOtherOffCall(user_other) {
+	addUsersRegister([user_other]);
+}
+
+function signalOnUserOtherOnCall(user_other) {
+	addUsersRegister([user_other]);
+}
+
+function signalOnRequestDial(user_from) {
+	mToUserKey = user_from.key;
+	showModalCalling(user_from);
+	closeModalUsers();
+}
+
+function signalOnDialingFailed(data) {
+	var user_to	= data.to,
+		message	= data.message;
+	mToUserKey = null;
+}
+
+function signalOnDialAnswered(user_from) {
+	closeModalUsers();
+	
+	if (mPeerConnection === null)
+	{
+		// create pear connection
+		mPeerConnection = peerConnectionCreate(
+			mRemoteVideo,
+			function(data) {
+				socketManagementSendMessage(mSocket, user_from.key, data);
+			}
+		);
+		
+		// local stream to send for target
+		peerConnectionAddStream(mPeerConnection, mLocalVideoStream);
 	}
 }
 
-var constraints = {
-	video: true
-};
+function signalOnDialRejected(user_from) {
+	mToUserKey = null;
+}
 
-console.log('Getting user media with constraints', constraints);
+function signalOnDialEnded(user_from) {
+	// -- close peer connection --
+	peerConnectionDestroy(mPeerConnection);
+	mPeerConnection = null;
+	
+	// -- close local video stream --
+	// if (mLocalVideoStream !== null)
+		// mLocalVideoStream.getTracks()[0].stop();
+	// mLocalVideoStream = null;
+	
+	showModalUsers();
+}
 
-function maybeStart() {
-	console.log('>>>>>>> maybeStart() ', isStarted, localStream, isChannelReady);
-	if (!isStarted && typeof localStream !== 'undefined' && isChannelReady) {
-		console.log('>>>>>> creating peer connection');
-		createPeerConnection();
-		pc.addStream(localStream);
-		isStarted = true;
-		console.log('isInitiator', isInitiator);
-		if (isInitiator) {
-			doCall();
-		}
+function signalOnMessageReceive(data) {
+	if (data.message)
+	{
+		if (data.message.type)
+			peerConnectionOnReceiveData(mSocket, data.from.key, data.message);
+		else
+			addChatMessage(data.from, data.message);
 	}
 }
 
-window.onbeforeunload = function() {
-	sendMessage('bye');
-};
 
-/////////////////////////////////////////////////////////
+// ---------------
+// -- signaling --
+// ---------------
 
-function createPeerConnection() {
-	try {
-		pc = new RTCPeerConnection(null);
-		pc.onicecandidate = handleIceCandidate;
-		pc.onaddstream = handleRemoteStreamAdded;
-		pc.onremovestream = handleRemoteStreamRemoved;
-		console.log('Created RTCPeerConnnection');
-	} catch (e) {
-		console.log('Failed to create PeerConnection, exception: ' + e.message);
-		alert('Cannot create RTCPeerConnection object.');
+function socketManagementRegister(user, setting) {
+	var socketio = io('https://174.138.24.216:8080');
+	var socket = socketio.connect();
+	
+	socket.emit('register', user);
+	
+	socket.on('user_registered', function(data) {
+		console.log('user_registered', data);
+		
+		if (setting.onRegistered)
+			setting.onRegistered(data);
+	});
+	
+	socket.on('user_other_registered', function(data) {
+		console.log('user_other_registered', data);
+		
+		if (setting.onUserOtherRegistered)
+			setting.onUserOtherRegistered(data);
+	});
+
+	socket.on('user_other_unregistered', function(data) {
+		console.log('user_other_unregistered', data);
+		
+		if (setting.onUserOtherUnregistered)
+			setting.onUserOtherUnregistered(data);
+	});
+
+	socket.on('get_user_others', function(data) {
+		console.log('get_user_others', data);
+		
+		if (setting.onGetUserOthers)
+			setting.onGetUserOthers(data);
+	});
+	
+	socket.on('user_other_offcall', function(data) {
+		console.log('user_other_offcall', data);
+		
+		if (setting.onUserOtherOffCall)
+			setting.onUserOtherOffCall(data);
+	});
+	
+	socket.on('user_other_oncall', function(data) {
+		console.log('user_other_oncall', data);
+		
+		if (setting.onUserOtherOnCall)
+			setting.onUserOtherOnCall(data);
+	});
+	
+	socket.on('dial_dialing', function(data) {
+		console.log('dial_dialing', data);
+		
+		if (setting.onRequestDial)
+			setting.onRequestDial(data);
+	});
+	
+	socket.on('dial_dialing_failed', function(data) {
+		console.log('dial_dialing_failed', data);
+		
+		if (setting.onDialingFailed)
+			setting.onDialingFailed(data);
+	});
+	
+	socket.on('dial_answer', function(data) {
+		console.log('dial_answer', data);
+		
+		if (setting.onDialAnswered)
+			setting.onDialAnswered(data);
+	});
+	
+	socket.on('dial_reject', function(data) {
+		console.log('dial_reject', data);
+		
+		if (setting.onDialRejected)
+			setting.onDialRejected(data);
+	});
+	
+	socket.on('dial_end', function(data) {
+		console.log('dial_end', data);
+		
+		if (setting.onDialEnded)
+			setting.onDialEnded(data);
+	});
+
+	socket.on('message_receive', function(data) {
+		console.log('message_receive', data);
+		
+		if (setting.onMessageReceive)
+			setting.onMessageReceive(data);
+	});
+
+	socket.on('log', function(data) {
+		console.log(data);
+	});
+
+	return socket;
+}
+
+function socketManagementUnregister(socket) {
+	if (socket === null)
 		return;
+	
+	socket.emit('unregister');
+	socket.disconnect();
+}
+
+function socketManagementGetUserOthers(socket) {
+	if (socket === null)
+		return;
+	
+	socket.emit('get_user_others');
+}
+
+function socketManagementDialRequest(socket, to_user_key) {
+	if (socket === null || to_user_key === null)
+		return;
+	
+	socket.emit('dial', {
+		type	: 'dialing',
+		to		: to_user_key
+	});
+}
+
+function socketManagementDialAnswer(socket, to_user_key) {
+	if (socket === null || to_user_key === null)
+		return;
+	
+	socket.emit('dial', {
+		type	: 'answer',
+		to		: to_user_key
+	});
+}
+
+function socketManagementDialReject(socket, to_user_key) {
+	if (socket === null || to_user_key === null)
+		return;
+	
+	socket.emit('dial', {
+		type	: 'reject',
+		to		: to_user_key
+	});
+}
+
+function socketManagementDialEnd(socket, to_user_key) {
+	if (socket === null || to_user_key === null)
+		return;
+	
+	socket.emit('dial', {
+		type	: 'end',
+		to		: to_user_key
+	});
+}
+
+function socketManagementSendMessage(socket, to_user_key, message) {
+	if (socket === null || to_user_key === null)
+		return;
+	
+	console.log('socketManagementSendMessage', to_user_key, message);
+	
+	socket.emit('message_send', {
+		to		: to_user_key,
+		message	: message
+	});
+}
+
+
+// -----------------------
+// -- RTC Communication --
+// -----------------------
+
+function peerConnectionCreate(remoteVideo, onSendSignalData) {
+	var peerConnectionProfile = null;
+	
+	try
+	{
+		var peerConnection = new RTCPeerConnection(null);
+		
+		peerConnection.onicecandidate = function(event) {
+			console.log('icecandidate event: ', event);
+			if (event.candidate)
+			{
+				if (onSendSignalData)
+				{
+					onSendSignalData({
+						type		: 'candidate',
+						id			: event.candidate.sdpMid,
+						label		: event.candidate.sdpMLineIndex,
+						candidate	: event.candidate.candidate
+					});
+				}
+			}
+			else
+			{
+				console.log('End of candidates.');
+			}
+		};
+		
+		peerConnection.onaddstream = function(event) {
+			console.log('Remote stream added.');
+			
+			if (remoteVideo === null)
+				return;
+			
+			remoteVideo.src = window.URL.createObjectURL(event.stream);
+		};
+		
+		peerConnection.onremovestream = function(event) {
+			console.log('Remote stream removed. Event: ', event);
+		};
+		
+		console.log('Created RTCPeerConnnection');
+		peerConnectionProfile = {
+			peerConnection		: peerConnection,
+			onSendSignalData	: onSendSignalData
+		};
 	}
-}
-
-function handleIceCandidate(event) {
-	console.log('icecandidate event: ', event);
-	if (event.candidate) {
-		sendMessage({
-			type: 'candidate',
-			label: event.candidate.sdpMLineIndex,
-			id: event.candidate.sdpMid,
-			candidate: event.candidate.candidate
-		});
-	} else {
-		console.log('End of candidates.');
+	catch (e)
+	{
+		console.log('Failed to create PeerConnection, exception: ' + e.message);
+		peerConnectionProfile = null
 	}
+	
+	return peerConnectionProfile;
 }
 
-function handleRemoteStreamAdded(event) {
-	console.log('Remote stream added.');
-	remoteVideo.src = window.URL.createObjectURL(event.stream);
-	remoteStream = event.stream;
+function peerConnectionAddStream(peerConnection, stream) {
+	if (peerConnection === null)
+		return;
+	
+	if (peerConnection.peerConnection === null)
+		return;
+	
+	if (stream === null)
+		return;
+	
+	peerConnection.peerConnection.addStream(stream);
 }
 
-function handleCreateOfferError(event) {
-	console.log('createOffer() error: ', event);
-}
-
-function doCall() {
-	console.log('Sending offer to peer');
-	pc.createOffer(setLocalAndSendMessage, handleCreateOfferError);
-}
-
-function doAnswer() {
-	console.log('Sending answer to peer.');
-	pc.createAnswer().then(
-		setLocalAndSendMessage,
-		onCreateSessionDescriptionError
+function peerConnectionDoCall(peerConnection) {
+	if (peerConnection === null)
+		return;
+	
+	if (peerConnection.peerConnection === null)
+		return;
+	
+	console.log('Sending call to peer.');
+	peerConnection.peerConnection.createOffer(
+		function (sessionDescription) {
+			peerConnection.peerConnection.setLocalDescription(sessionDescription);
+			
+			if (peerConnection.onSendSignalData)
+				peerConnection.onSendSignalData(sessionDescription);
+		}, 
+		function (event) {
+			console.log('createOffer() error: ', event);
+		}
 	);
 }
 
-function setLocalAndSendMessage(sessionDescription) {
-	// Set Opus as the preferred codec in SDP if Opus is present.
-	//  sessionDescription.sdp = preferOpus(sessionDescription.sdp);
-	pc.setLocalDescription(sessionDescription);
-	console.log('setLocalAndSendMessage sending message', sessionDescription);
-	sendMessage(sessionDescription);
+function peerConnectionDoAnswer(peerConnection) {
+	if (peerConnection === null)
+		return;
+	
+	if (peerConnection.peerConnection === null)
+		return;
+	
+	console.log('Sending answer to peer.');
+	peerConnection.peerConnection.createAnswer().then(
+		function (sessionDescription) {
+			peerConnection.peerConnection.setLocalDescription(sessionDescription);
+			
+			if (peerConnection.onSendSignalData)
+				peerConnection.onSendSignalData(sessionDescription);
+		},
+		function (error) {
+			console.log('createAnswer() error: ', error);
+		}
+	);
 }
 
-function onCreateSessionDescriptionError(error) {
-	trace('Failed to create session description: ' + error.toString());
-}
-
-function handleRemoteStreamRemoved(event) {
-	console.log('Remote stream removed. Event: ', event);
-}
-
-function hangup() {
-	console.log('Hanging up.');
-	stop();
-	sendMessage('bye');
-}
-
-function handleRemoteHangup() {
-	console.log('Session terminated.');
-	stop();
-	isInitiator = false;
-}
-
-function stop() {
-	isStarted = false;
-	// isAudioMuted = false;
-	// isVideoMuted = false;
-	pc.close();
-	pc = null;
-}
-
-///////////////////////////////////////////
-
-// Set Opus as the default audio codec if it's present.
-function preferOpus(sdp) {
-	var sdpLines = sdp.split('\r\n');
-	var mLineIndex;
-	// Search for m line.
-	for (var i = 0; i < sdpLines.length; i++) {
-		if (sdpLines[i].search('m=audio') !== -1) {
-			mLineIndex = i;
-			break;
+function peerConnectionOnReceiveData(socket, to_user_key, data) {
+	if (!data.type)
+		return;
+	
+	if (data.type === 'offer')
+	{
+		if (mPeerConnection === null)
+		{
+			// create pear connection
+			mPeerConnection = peerConnectionCreate(
+				mRemoteVideo,
+				function(data) {
+					socketManagementSendMessage(socket, to_user_key, data);
+				}
+			);
+			
+			// local stream to send for target
+			peerConnectionAddStream(mPeerConnection, mLocalVideoStream);
+		}
+		
+		// set remote description
+		mPeerConnection.peerConnection.setRemoteDescription(new RTCSessionDescription(data));
+		
+		// send answer from call peer connection
+		peerConnectionDoAnswer(mPeerConnection);
+	}
+	else if (data.type === 'answer')
+	{
+		if (mPeerConnection !== null)
+		{
+			// set remote description
+			mPeerConnection.peerConnection.setRemoteDescription(new RTCSessionDescription(data));
 		}
 	}
-	if (mLineIndex === null) {
-		return sdp;
-	}
-
-	// If Opus is available, set it as the default in m line.
-	for (i = 0; i < sdpLines.length; i++) {
-		if (sdpLines[i].search('opus/48000') !== -1) {
-			var opusPayload = extractSdp(sdpLines[i], /:(\d+) opus\/48000/i);
-			if (opusPayload) {
-				sdpLines[mLineIndex] = setDefaultCodec(sdpLines[mLineIndex],
-				opusPayload);
-			}
-			break;
+	else if (data.type === 'candidate')
+	{
+		if (mPeerConnection !== null)
+		{
+			// add ICE candidate
+			mPeerConnection.peerConnection.addIceCandidate(
+				new RTCIceCandidate({
+					sdpMLineIndex	: data.label,
+					candidate		: data.candidate
+				})
+			);
 		}
 	}
-
-	// Remove CN in m line and sdp.
-	sdpLines = removeCN(sdpLines, mLineIndex);
-
-	sdp = sdpLines.join('\r\n');
-	return sdp;
 }
 
-function extractSdp(sdpLine, pattern) {
-	var result = sdpLine.match(pattern);
-	return result && result.length === 2 ? result[1] : null;
-}
-
-// Set the selected codec to the first in m line.
-function setDefaultCodec(mLine, payload) {
-	var elements = mLine.split(' ');
-	var newLine = [];
-	var index = 0;
-	for (var i = 0; i < elements.length; i++) {
-		if (index === 3) { // Format of media starts from the fourth.
-			newLine[index++] = payload; // Put target payload to the first.
-		}
-		if (elements[i] !== payload) {
-			newLine[index++] = elements[i];
-		}
-	}
-	return newLine.join(' ');
-}
-
-// Strip CN from sdp before CN constraints is ready.
-function removeCN(sdpLines, mLineIndex) {
-	var mLineElements = sdpLines[mLineIndex].split(' ');
-	// Scan from end for the convenience of removing an item.
-	for (var i = sdpLines.length - 1; i >= 0; i--) {
-		var payload = extractSdp(sdpLines[i], /a=rtpmap:(\d+) CN\/\d+/i);
-		if (payload) {
-			var cnPos = mLineElements.indexOf(payload);
-			if (cnPos !== -1) {
-				// Remove CN payload from m line.
-				mLineElements.splice(cnPos, 1);
-			}
-			// Remove CN line in sdp
-			sdpLines.splice(i, 1);
-		}
-	}
-
-	sdpLines[mLineIndex] = mLineElements.join(' ');
-	return sdpLines;
+function peerConnectionDestroy(peerConnection) {
+	if (peerConnection === null)
+		return;
+	
+	peerConnection.onSendSignalData = null;
+	if (peerConnection.peerConnection !== null)
+		peerConnection.peerConnection.close();
+	peerConnection.peerConnection = null;
 }
