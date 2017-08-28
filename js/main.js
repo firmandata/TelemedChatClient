@@ -500,7 +500,18 @@ function peerConnectionCreate(remoteVideo, onSendSignalData) {
 	
 	try
 	{
-		var peerConnection = new RTCPeerConnection(null);
+		var peerConnection = new RTCPeerConnection({
+			'iceServers': [
+				{
+					'url': 'stun:174.138.24.216:3478'
+				},
+				{
+					'url'		: 'turn:174.138.24.216:3478',
+					'username'	: 'firman',
+					'credential'	: '1122334455'
+				}
+			]
+		});
 		
 		peerConnection.onicecandidate = function(event) {
 			console.log('icecandidate event: ', event);
